@@ -36,19 +36,50 @@ jobs:
         cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:latest
         cache-to: type=inline
     
+    - name: Install OCI CLI
+      run: |
+        echo "Installing OCI CLI..."
+        curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh -o install_oci_cli.sh
+        chmod +x install_oci_cli.sh
+        ./install_oci_cli.sh --accept-all-defaults
+        echo "$HOME/bin" >> $GITHUB_PATH
+        echo "OCI CLI installed successfully"
+        
+    - name: Configure OCI CLI
+      run: |
+        echo "Configuring OCI CLI..."
+        mkdir -p ~/.oci
+        echo "[DEFAULT]" > ~/.oci/config
+        echo "user=${{ secrets.OCI_CLI_USER }}" >> ~/.oci/config
+        echo "fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}" >> ~/.oci/config
+        echo "tenancy=${{ secrets.OCI_CLI_TENANCY }}" >> ~/.oci/config
+        echo "region=${{ secrets.OCI_CLI_REGION }}" >> ~/.oci/config
+        echo "key_file=~/.oci/key.pem" >> ~/.oci/config
+        echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/key.pem
+        chmod 600 ~/.oci/key.pem
+        echo "OCI CLI configured successfully"
+        
+    - name: Verify OCI CLI
+      run: |
+        echo "Verifying OCI CLI setup..."
+        oci --version
+        echo "OCI CLI version verified"
+    
     - name: Set up kubectl
       uses: azure/setup-kubectl@v3
       with:
         version: 'latest'
     
-    - name: Configure kubectl with kubeconfig
+    - name: Configure kubectl with existing kubeconfig
       run: |
-        echo "Setting up kubeconfig..."
+        echo "Setting up kubeconfig from secret..."
         mkdir -p ~/.kube
         echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
         chmod 600 ~/.kube/config
         echo "Kubeconfig configured successfully"
-        
+        echo "Kubeconfig structure (sanitized):"
+        cat ~/.kube/config | grep -v "token\|certificate-authority-data\|client-certificate-data\|client-key-data" || echo "Config loaded"
+    
     - name: Verify kubectl access
       run: |
         echo "Testing kubectl connection..."

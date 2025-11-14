@@ -4,7 +4,7 @@ const port = 3000;
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'Hello World from OKE!',
+    message: 'Hello from Ollacloud Platform!!!',
     timestamp: new Date().toISOString(),
     hostname: require('os').hostname()
   });

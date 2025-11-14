@@ -36,69 +36,46 @@ jobs:
         cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:latest
         cache-to: type=inline
     
-    - name: Install OCI CLI
-      run: |
-        curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh -o install_oci_cli.sh
-        chmod +x install_oci_cli.sh
-        ./install_oci_cli.sh --accept-all-defaults
-        echo "$HOME/bin" >> $GITHUB_PATH
-        
-    - name: Configure OCI CLI
-      run: |
-        mkdir -p ~/.oci
-        echo "[DEFAULT]" > ~/.oci/config
-        echo "user=${{ secrets.OCI_CLI_USER }}" >> ~/.oci/config
-        echo "fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}" >> ~/.oci/config
-        echo "tenancy=${{ secrets.OCI_CLI_TENANCY }}" >> ~/.oci/config
-        echo "region=${{ secrets.OCI_CLI_REGION }}" >> ~/.oci/config
-        echo "key_file=~/.oci/key.pem" >> ~/.oci/config
-        echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/key.pem
-        chmod 600 ~/.oci/key.pem
-    
     - name: Set up kubectl
       uses: azure/setup-kubectl@v3
       with:
         version: 'latest'
     
-    - name: Get OKE kubeconfig
+    - name: Configure kubectl with kubeconfig
       run: |
+        echo "Setting up kubeconfig..."
         mkdir -p ~/.kube
-        echo "Generating kubeconfig for cluster: ${{ secrets.OKE_CLUSTER_ID }}"
-        echo "Region: ${{ secrets.OCI_CLI_REGION }}"
-        oci ce cluster create-kubeconfig \
-          --cluster-id ${{ secrets.OKE_CLUSTER_ID }} \
-          --file ~/.kube/config \
-          --region ${{ secrets.OCI_CLI_REGION }} \
-          --token-version 2.0.0 \
-          --kube-endpoint PUBLIC_ENDPOINT \
-          --debug
-        echo "Kubeconfig generated successfully"
+        echo "${{ secrets.KUBE_CONFIG_BASE64 }}" | base64 -d > ~/.kube/config
         chmod 600 ~/.kube/config
-        echo "Kubeconfig permissions set"
-        export KUBECONFIG=~/.kube/config
-        echo "KUBECONFIG environment variable set"
-        echo "Kubeconfig contents (sanitized):"
-        cat ~/.kube/config | grep -v "token\|certificate-authority-data" || echo "Could not display config"
-    
+        echo "Kubeconfig configured successfully"
+        
     - name: Verify kubectl access
       run: |
-        export KUBECONFIG=~/.kube/config
+        echo "Testing kubectl connection..."
+        kubectl cluster-info
+        echo "Listing nodes..."
         kubectl get nodes
+        echo "Connection verified!"
     
     - name: Update Kubernetes manifests
       run: |
+        echo "Updating image in deployment manifest..."
         sed -i "s|IMAGE_PLACEHOLDER|${{ env.DOCKER_IMAGE }}:${{ github.sha }}|g" k8s/deployment.yaml
+        echo "Manifest updated with image: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}"
     
     - name: Deploy to OKE
       run: |
-        export KUBECONFIG=~/.kube/config
+        echo "Applying Kubernetes manifests..."
         kubectl apply -f k8s/deployment.yaml
         kubectl apply -f k8s/service.yaml
+        echo "Manifests applied successfully"
     
     - name: Verify deployment
       run: |
-        export KUBECONFIG=~/.kube/config
-        kubectl rollout status deployment/hello-world
+        echo "Waiting for deployment to complete..."
+        kubectl rollout status deployment/hello-world --timeout=5m
+        echo "Deployment completed! Checking pods..."
         kubectl get pods -l app=hello-world
+        echo "Checking service..."
         kubectl get service hello-world-service
-
+        echo "Deployment verification complete!"

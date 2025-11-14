@@ -1,0 +1,104 @@
+name: Build and Deploy to OKE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/hello-world-oke
+  
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ env.DOCKER_IMAGE }}:latest
+          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+        cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:latest
+        cache-to: type=inline
+    
+    - name: Install OCI CLI
+      run: |
+        curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh -o install_oci_cli.sh
+        chmod +x install_oci_cli.sh
+        ./install_oci_cli.sh --accept-all-defaults
+        echo "$HOME/bin" >> $GITHUB_PATH
+        
+    - name: Configure OCI CLI
+      run: |
+        mkdir -p ~/.oci
+        echo "[DEFAULT]" > ~/.oci/config
+        echo "user=${{ secrets.OCI_CLI_USER }}" >> ~/.oci/config
+        echo "fingerprint=${{ secrets.OCI_CLI_FINGERPRINT }}" >> ~/.oci/config
+        echo "tenancy=${{ secrets.OCI_CLI_TENANCY }}" >> ~/.oci/config
+        echo "region=${{ secrets.OCI_CLI_REGION }}" >> ~/.oci/config
+        echo "key_file=~/.oci/key.pem" >> ~/.oci/config
+        echo "${{ secrets.OCI_CLI_KEY_CONTENT }}" > ~/.oci/key.pem
+        chmod 600 ~/.oci/key.pem
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'latest'
+    
+    - name: Get OKE kubeconfig
+      run: |
+        mkdir -p ~/.kube
+        echo "Generating kubeconfig for cluster: ${{ secrets.OKE_CLUSTER_ID }}"
+        echo "Region: ${{ secrets.OCI_CLI_REGION }}"
+        oci ce cluster create-kubeconfig \
+          --cluster-id ${{ secrets.OKE_CLUSTER_ID }} \
+          --file ~/.kube/config \
+          --region ${{ secrets.OCI_CLI_REGION }} \
+          --token-version 2.0.0 \
+          --kube-endpoint PUBLIC_ENDPOINT \
+          --debug
+        echo "Kubeconfig generated successfully"
+        chmod 600 ~/.kube/config
+        echo "Kubeconfig permissions set"
+        export KUBECONFIG=~/.kube/config
+        echo "KUBECONFIG environment variable set"
+        echo "Kubeconfig contents (sanitized):"
+        cat ~/.kube/config | grep -v "token\|certificate-authority-data" || echo "Could not display config"
+    
+    - name: Verify kubectl access
+      run: |
+        export KUBECONFIG=~/.kube/config
+        kubectl get nodes
+    
+    - name: Update Kubernetes manifests
+      run: |
+        sed -i "s|IMAGE_PLACEHOLDER|${{ env.DOCKER_IMAGE }}:${{ github.sha }}|g" k8s/deployment.yaml
+    
+    - name: Deploy to OKE
+      run: |
+        export KUBECONFIG=~/.kube/config
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+    
+    - name: Verify deployment
+      run: |
+        export KUBECONFIG=~/.kube/config
+        kubectl rollout status deployment/hello-world
+        kubectl get pods -l app=hello-world
+        kubectl get service hello-world-service
+

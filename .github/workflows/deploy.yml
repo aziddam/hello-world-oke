@@ -68,7 +68,7 @@ jobs:
           --file ~/.kube/config \
           --region ${{ secrets.OCI_CLI_REGION }} \
           --token-version 2.0.0 \
-          --kube-endpoint PUBLIC_ENDPOINT
+          --kube-endpoint PUBLIC_ENDPOINT \
           --debug
         chmod 600 ~/.kube/config
         export KUBECONFIG=~/.kube/config
